@@ -6,6 +6,9 @@ from flask import Flask
 from playwright.async_api import async_playwright
 from datetime import datetime
 
+# Устанавливаем путь для браузера
+os.environ['PLAYWRIGHT_BROWSERS_PATH'] = '/opt/render/project/.cache/ms-playwright'
+
 app = Flask(__name__)
 
 @app.route('/')
@@ -20,7 +23,7 @@ def run_web():
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port)
 
-# ⭐ ВАШИ COOKIES ИЗ БРАУЗЕРА
+# ⭐ ВАШИ COOKIES
 COOKIES = [
     {
         "name": "eternalzero-session",
@@ -43,159 +46,101 @@ COOKIES = [
 ]
 
 async def solve_hcaptcha(page):
-    """Решение hCaptcha (простой клик по чекбоксу)"""
     try:
-        print("🔐 Ожидаю появления hCaptcha...")
-        
-        # Ждем iframe hCaptcha
+        print("🔐 Ожидаю hCaptcha...")
         iframe = await page.wait_for_selector('iframe[src*="hcaptcha.com"]', timeout=10000)
         frame = await iframe.content_frame()
-        
         if frame:
-            # Кликаем на чекбокс
             checkbox = await frame.wait_for_selector('.checkbox', timeout=5000)
             await checkbox.click()
-            print("✅ Чекбокс hCaptcha нажат")
-            
-            # Ждем решения (3 секунды)
+            print("✅ Чекбокс нажат")
             await page.wait_for_timeout(3000)
-            
-            # Получаем токен
             token = await page.evaluate('hcaptcha.getResponse()')
             if token:
-                print(f"✅ Получен hCaptcha токен: {token[:30]}...")
+                print(f"✅ Получен токен: {token[:30]}...")
                 return token
-            
         return None
-        
     except Exception as e:
-        print(f"⚠️ Ошибка при решении hCaptcha: {e}")
+        print(f"⚠️ Ошибка hCaptcha: {e}")
         return None
 
 async def renew_server():
-    """Основная функция: продление сервера"""
     print("=" * 60)
-    print(f"🚀 Запуск задачи: {datetime.now()}")
+    print(f"🚀 Запуск: {datetime.now()}")
     print("=" * 60)
     
     try:
         async with async_playwright() as p:
-            # Запускаем браузер с аргументами для Linux (Render)
             browser = await p.chromium.launch(
                 headless=True,
                 args=[
                     '--no-sandbox',
                     '--disable-setuid-sandbox',
                     '--disable-blink-features=AutomationControlled',
-                    '--disable-dev-shm-usage',
-                    '--disable-gpu',
-                    '--single-process'
+                    '--disable-dev-shm-usage'
                 ]
             )
             
-            # Создаем контекст с реалистичным user-agent
             context = await browser.new_context(
-                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                 viewport={'width': 1920, 'height': 1080}
             )
             
-            # Устанавливаем cookies для авторизации
             await context.add_cookies(COOKIES)
             print(f"✅ Загружено {len(COOKIES)} cookies")
             
             page = await context.new_page()
-            
-            # Переходим на страницу сервера
             url = 'https://eternalzero.cloud/servers/232/info'
             print(f"🌐 Перехожу: {url}")
             await page.goto(url, wait_until='networkidle', timeout=30000)
-            
             await page.wait_for_timeout(3000)
             
-            # Проверяем, успешна ли авторизация
-            current_url = page.url
-            print(f"📍 Текущий URL: {current_url}")
-            
-            if 'login' in current_url.lower():
-                print("❌ ОШИБКА: Не удалось авторизоваться! Cookies устарели.")
-                await page.screenshot(path='auth_failed.png')
+            if 'login' in page.url.lower():
+                print("❌ Ошибка авторизации")
                 await browser.close()
                 return
             
-            print("✅ Авторизация успешна!")
+            print("✅ Авторизация успешна")
             await page.screenshot(path='page_loaded.png')
             
-            # Решаем hCaptcha, если есть
-            hcaptcha_exists = await page.query_selector('.h-captcha')
-            if hcaptcha_exists:
-                print("🔐 Обнаружена hCaptcha, решаем...")
+            if await page.query_selector('.h-captcha'):
                 token = await solve_hcaptcha(page)
                 if token:
-                    # Вставляем токен в скрытое поле
-                    await page.evaluate(f"""
-                        const input = document.querySelector('[name="h-captcha-response"]');
-                        if (input) input.value = '{token}';
-                    """)
-                    print("✅ hCaptcha токен вставлен")
-                else:
-                    print("⚠️ Не удалось решить hCaptcha, пробуем продолжить...")
+                    await page.evaluate(f'document.querySelector("[name=\'h-captcha-response\']").value = "{token}"')
             
-            # Ищем и нажимаем кнопку Renew Server
-            print("🔍 Ищу кнопку Renew Server...")
-            
-            # Ждем появления кнопки
             await page.wait_for_selector('#renew-button', timeout=10000)
-            
-            # Кликаем
             await page.click('#renew-button')
-            print("✅ Кнопка Renew Server нажата!")
+            print("✅ Кнопка нажата")
             
-            # Ждем ответа от сервера
             await page.wait_for_timeout(5000)
-            
-            # Проверяем результат по содержимому страницы
             content = await page.content()
             
             if 'success' in content.lower() or 'renewed' in content.lower():
-                print("✅✅✅ СЕРВЕР УСПЕШНО ПРОДЛЕН! ✅✅✅")
-            elif 'daily limit' in content.lower() or 'renewal limit' in content.lower():
-                print("⚠️ Достигнут лимит продлений на сегодня")
+                print("✅✅✅ СЕРВЕР ПРОДЛЕН!")
+            elif 'daily limit' in content.lower():
+                print("⚠️ Лимит продлений на сегодня")
             elif 'discord' in content.lower():
-                print("⚠️ Требуется подключение Discord аккаунта")
+                print("⚠️ Требуется Discord")
             else:
-                print("❓ Результат неизвестен, проверьте скриншот result.png")
+                print("❓ Результат неизвестен")
             
-            # Сохраняем скриншот результата
             await page.screenshot(path='result.png')
             await browser.close()
             
-            print(f"✅ Задача завершена: {datetime.now()}")
-            
     except Exception as e:
-        print(f"❌ КРИТИЧЕСКАЯ ОШИБКА: {e}")
+        print(f"❌ Ошибка: {e}")
         import traceback
         traceback.print_exc()
 
 async def main_loop():
-    """Основной цикл: выполняется каждые 3 часа"""
-    # Выполняем сразу при запуске
     await renew_server()
-    
-    # Бесконечный цикл
     while True:
         print(f"⏰ Следующая задача через 3 часа ({datetime.now()})")
-        await asyncio.sleep(3 * 3600)  # 3 часа
+        await asyncio.sleep(3 * 3600)
         await renew_server()
 
 if __name__ == '__main__':
-    # Запускаем веб-сервер в отдельном потоке для health checks
-    web_thread = threading.Thread(target=run_web, daemon=True)
-    web_thread.start()
+    threading.Thread(target=run_web, daemon=True).start()
     print(f"🌐 Веб-сервер запущен на порту {os.environ.get('PORT', 10000)}")
-    print("🤖 Бот запущен, начинаю работу...")
-    
-    # Запускаем основной цикл
-    try:
-        asyncio.run(main_loop())
-    except KeyboardInterrupt:
-        print("🛑 Бот остановлен пользователем")
+    print("🤖 Бот запущен")
+    asyncio.run(main_loop())
