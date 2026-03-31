@@ -1,45 +1,63 @@
 # bot.py
 import asyncio
 import threading
+import os
 from flask import Flask
 from playwright.async_api import async_playwright
 
 app = Flask(__name__)
 
-# Простая страница для проверки здоровья бота
+# Добавляем маршрут для корневого URL
+@app.route('/')
+def index():
+    return "Bot is running! Use /health to check status", 200
+
 @app.route('/health')
 def health():
     return "OK", 200
 
 def run_web():
-    app.run(host='0.0.0.0', port=8080)
+    port = int(os.environ.get('PORT', 8080))
+    app.run(host='0.0.0.0', port=port)
 
-# Функция, которая делает ваше дело — капча и кнопка
 async def renew_server():
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        page = await browser.new_page()
-        
-        # Идем на сайт Eternal Zero
-        await page.goto('https://eternal-zero.ru')  # пример
-        
-        # Здесь логика прохождения капчи и нажатия кнопки
-        # ... (ваш код)
-        
-        await browser.close()
+    print("Запускаю задачу renew server...")
+    try:
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(
+                headless=True,
+                args=['--no-sandbox', '--disable-setuid-sandbox']
+            )
+            page = await browser.new_page()
+            
+            # ВАЖНО: Замените на реальный URL Eternal Zero
+            url = "https://eternal-zero.ru"  # ИЗМЕНИТЕ НА ПРАВИЛЬНЫЙ URL
+            print(f"Перехожу на {url}")
+            await page.goto(url, wait_until='networkidle')
+            
+            # Ваша логика здесь
+            await asyncio.sleep(3)
+            
+            print("Страница загружена")
+            await browser.close()
+    except Exception as e:
+        print(f"Ошибка в renew_server: {e}")
 
-# Основной цикл: каждые 3 часа запускаем задачу
 async def main_loop():
     while True:
         try:
             await renew_server()
+            print("Задача выполнена, жду 3 часа...")
         except Exception as e:
-            print(f"Ошибка: {e}")
+            print(f"Ошибка в цикле: {e}")
         await asyncio.sleep(3 * 3600)  # 3 часа
 
 if __name__ == '__main__':
-    # Запускаем веб-сервер в отдельном потоке
-    threading.Thread(target=run_web, daemon=True).start()
+    web_thread = threading.Thread(target=run_web, daemon=True)
+    web_thread.start()
+    print("Веб-сервер запущен на порту", os.environ.get('PORT', 8080))
     
-    # Запускаем основной цикл
-    asyncio.run(main_loop())
+    try:
+        asyncio.run(main_loop())
+    except KeyboardInterrupt:
+        print("Бот остановлен")
