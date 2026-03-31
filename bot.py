@@ -17,10 +17,10 @@ def health():
     return "OK", 200
 
 def run_web():
-    port = int(os.environ.get('PORT', 8080))
+    port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port)
 
-# ⭐ ВАШИ COOKIES ИЗ БРАУЗЕРА (только нужные для авторизации)
+# ⭐ ВАШИ COOKIES ИЗ БРАУЗЕРА
 COOKIES = [
     {
         "name": "eternalzero-session",
@@ -43,9 +43,9 @@ COOKIES = [
 ]
 
 async def solve_hcaptcha(page):
-    """Решение hCaptcha"""
+    """Решение hCaptcha (простой клик по чекбоксу)"""
     try:
-        print("Ожидаю появления hCaptcha...")
+        print("🔐 Ожидаю появления hCaptcha...")
         
         # Ждем iframe hCaptcha
         iframe = await page.wait_for_selector('iframe[src*="hcaptcha.com"]', timeout=10000)
@@ -73,28 +73,33 @@ async def solve_hcaptcha(page):
         return None
 
 async def renew_server():
+    """Основная функция: продление сервера"""
     print("=" * 60)
     print(f"🚀 Запуск задачи: {datetime.now()}")
     print("=" * 60)
     
     try:
         async with async_playwright() as p:
+            # Запускаем браузер с аргументами для Linux (Render)
             browser = await p.chromium.launch(
                 headless=True,
                 args=[
                     '--no-sandbox',
                     '--disable-setuid-sandbox',
                     '--disable-blink-features=AutomationControlled',
-                    '--disable-dev-shm-usage'
+                    '--disable-dev-shm-usage',
+                    '--disable-gpu',
+                    '--single-process'
                 ]
             )
             
+            # Создаем контекст с реалистичным user-agent
             context = await browser.new_context(
                 user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                 viewport={'width': 1920, 'height': 1080}
             )
             
-            # Устанавливаем cookies
+            # Устанавливаем cookies для авторизации
             await context.add_cookies(COOKIES)
             print(f"✅ Загружено {len(COOKIES)} cookies")
             
@@ -107,10 +112,14 @@ async def renew_server():
             
             await page.wait_for_timeout(3000)
             
-            # Проверяем авторизацию
-            if 'login' in page.url.lower():
+            # Проверяем, успешна ли авторизация
+            current_url = page.url
+            print(f"📍 Текущий URL: {current_url}")
+            
+            if 'login' in current_url.lower():
                 print("❌ ОШИБКА: Не удалось авторизоваться! Cookies устарели.")
                 await page.screenshot(path='auth_failed.png')
+                await browser.close()
                 return
             
             print("✅ Авторизация успешна!")
@@ -131,7 +140,7 @@ async def renew_server():
                 else:
                     print("⚠️ Не удалось решить hCaptcha, пробуем продолжить...")
             
-            # Ищем и нажимаем кнопку Renew
+            # Ищем и нажимаем кнопку Renew Server
             print("🔍 Ищу кнопку Renew Server...")
             
             # Ждем появления кнопки
@@ -141,10 +150,10 @@ async def renew_server():
             await page.click('#renew-button')
             print("✅ Кнопка Renew Server нажата!")
             
-            # Ждем ответа
+            # Ждем ответа от сервера
             await page.wait_for_timeout(5000)
             
-            # Проверяем результат по тексту на странице
+            # Проверяем результат по содержимому страницы
             content = await page.content()
             
             if 'success' in content.lower() or 'renewed' in content.lower():
@@ -154,8 +163,9 @@ async def renew_server():
             elif 'discord' in content.lower():
                 print("⚠️ Требуется подключение Discord аккаунта")
             else:
-                print("❓ Результат неизвестен, проверьте скриншот")
+                print("❓ Результат неизвестен, проверьте скриншот result.png")
             
+            # Сохраняем скриншот результата
             await page.screenshot(path='result.png')
             await browser.close()
             
@@ -167,20 +177,21 @@ async def renew_server():
         traceback.print_exc()
 
 async def main_loop():
-    """Основной цикл: запускается каждые 3 часа"""
-    # Запускаем сразу при старте
+    """Основной цикл: выполняется каждые 3 часа"""
+    # Выполняем сразу при запуске
     await renew_server()
     
+    # Бесконечный цикл
     while True:
         print(f"⏰ Следующая задача через 3 часа ({datetime.now()})")
         await asyncio.sleep(3 * 3600)  # 3 часа
         await renew_server()
 
 if __name__ == '__main__':
-    # Запускаем веб-сервер для пингов
+    # Запускаем веб-сервер в отдельном потоке для health checks
     web_thread = threading.Thread(target=run_web, daemon=True)
     web_thread.start()
-    print("🌐 Веб-сервер запущен на порту", os.environ.get('PORT', 8080))
+    print(f"🌐 Веб-сервер запущен на порту {os.environ.get('PORT', 10000)}")
     print("🤖 Бот запущен, начинаю работу...")
     
     # Запускаем основной цикл
